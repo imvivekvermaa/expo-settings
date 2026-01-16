@@ -1,48 +1,147 @@
 import ExpoModulesCore
+import AVFoundation
 
 public class ExpoSettingsModule: Module {
-  // Each module class must implement the definition function. The definition consists of components
-  // that describes the module's functionality and behavior.
-  // See https://docs.expo.dev/modules/module-api for more details about available components.
+
+  private let audioEngine = AVAudioEngine()
+  private var isRunning = false
+
   public func definition() -> ModuleDefinition {
-    // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
-    // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
-    // The module will be accessible from `requireNativeModule('ExpoSettings')` in JavaScript.
     Name("ExpoSettings")
 
-    // Defines constant property on the module.
-    Constant("PI") {
-      Double.pi
+    Events("onAudioFrame", "onAudioError")
+
+    Function("start") {
+      self.startAudio()
     }
 
-    // Defines event names that the module can send to JavaScript.
-    Events("onChange")
+    Function("stop") {
+      self.stopAudio()
+    }
+  }
 
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
-    Function("hello") {
-      return "Hello world! 👋"
+  private func startAudio() {
+    if isRunning {
+      return
     }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
-    AsyncFunction("setValueAsync") { (value: String) in
-      // Send an event to JavaScript.
-      self.sendEvent("onChange", [
-        "value": value
+    let session = AVAudioSession.sharedInstance()
+
+    do {
+      try session.setCategory(
+        .playAndRecord,
+        mode: .voiceChat,
+        options: [.defaultToSpeaker, .allowBluetooth]
+      )
+
+      try session.setPreferredSampleRate(16000)
+      try session.setActive(true)
+
+      session.requestRecordPermission { granted in
+        if !granted {
+          self.sendEvent("onAudioError", [
+            "error": "Microphone permission denied"
+          ])
+          return
+        }
+
+        self.startEngine()
+      }
+    } catch {
+      sendEvent("onAudioError", [
+        "error": error.localizedDescription
       ])
     }
+  }
 
-    // Enables the module to be used as a native view. Definition components that are accepted as part of the
-    // view definition: Prop, Events.
-    View(ExpoSettingsView.self) {
-      // Defines a setter for the `url` prop.
-      Prop("url") { (view: ExpoSettingsView, url: URL) in
-        if view.webView.url != url {
-          view.webView.load(URLRequest(url: url))
-        }
-      }
+  private func startEngine() {
+    let inputNode = audioEngine.inputNode
+    let inputFormat = inputNode.inputFormat(forBus: 0)
 
-      Events("onLoad")
+    let desiredFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16,
+      sampleRate: 16000,
+      channels: 1,
+      interleaved: true
+    )
+
+    guard let format = desiredFormat else {
+      sendEvent("onAudioError", [
+        "error": "Failed to create audio format"
+      ])
+      return
     }
+
+    inputNode.removeTap(onBus: 0)
+
+    inputNode.installTap(
+      onBus: 0,
+      bufferSize: 320,
+      format: inputFormat
+    ) { buffer, _ in
+      self.processBuffer(buffer: buffer, targetFormat: format)
+    }
+
+    do {
+      try audioEngine.start()
+      isRunning = true
+    } catch {
+      sendEvent("onAudioError", [
+        "error": error.localizedDescription
+      ])
+    }
+  }
+
+  private func processBuffer(buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
+    guard let converter = AVAudioConverter(from: buffer.format, to: targetFormat) else {
+      return
+    }
+
+    let frameCapacity = AVAudioFrameCount(targetFormat.sampleRate / 50)
+    guard let pcmBuffer = AVAudioPCMBuffer(
+      pcmFormat: targetFormat,
+      frameCapacity: frameCapacity
+    ) else {
+      return
+    }
+
+    var error: NSError?
+    let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+      outStatus.pointee = .haveData
+      return buffer
+    }
+
+    converter.convert(to: pcmBuffer, error: &error, withInputFrom: inputBlock)
+
+    if error != nil {
+      return
+    }
+
+    guard let channelData = pcmBuffer.int16ChannelData else {
+      return
+    }
+
+    let channel = channelData.pointee
+    let frameLength = Int(pcmBuffer.frameLength)
+    let byteLength = frameLength * MemoryLayout<Int16>.size
+
+    let data = Data(bytes: channel, count: byteLength)
+
+    sendEvent("onAudioFrame", [
+      "sampleRate": 16000,
+      "channels": 1,
+      "pcm": data.base64EncodedString(),
+      "frames": frameLength
+    ])
+  }
+
+  private func stopAudio() {
+    if !isRunning {
+      return
+    }
+
+    audioEngine.inputNode.removeTap(onBus: 0)
+    audioEngine.stop()
+    isRunning = false
   }
 }

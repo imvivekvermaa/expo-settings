@@ -1,73 +1,50 @@
-import { useEvent } from 'expo';
-import ExpoSettings, { ExpoSettingsView } from 'expo-settings';
-import { Button, SafeAreaView, ScrollView, Text, View } from 'react-native';
+// import { EventSubscription } from "expo-modules-core";
+import * as ExpoSettings from "expo-settings";
+
+import { useEffect, useRef } from "react";
+import { Button, Text, View } from "react-native";
+// import * as ExpoSettings from "./index";
 
 export default function App() {
-  const onChangePayload = useEvent(ExpoSettings, 'onChange');
+  const frameCountRef = useRef(0);
+
+  useEffect(() => {
+    const frameSub = ExpoSettings.addAudioFrameListener((event) => {
+      frameCountRef.current += 1;
+
+      if (frameCountRef.current % 50 === 0) {
+        const pcmBytes =
+          (event.pcm.length * 3) / 4; // base64 → bytes approximation
+
+        console.log(
+          `[AUDIO] frames=${event.frames} sampleRate=${event.sampleRate} bytes≈${pcmBytes}`
+        );
+      }
+    });
+
+    const errorSub = ExpoSettings.addAudioErrorListener((event) => {
+      console.error("[AUDIO ERROR]", event.error);
+    });
+
+    return () => {
+      frameSub.remove();
+      errorSub.remove();
+    };
+  }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.container}>
-        <Text style={styles.header}>Module API Example</Text>
-        <Group name="Constants">
-          <Text>{ExpoSettings.PI}</Text>
-        </Group>
-        <Group name="Functions">
-          <Text>{ExpoSettings.hello()}</Text>
-        </Group>
-        <Group name="Async functions">
-          <Button
-            title="Set value"
-            onPress={async () => {
-              await ExpoSettings.setValueAsync('Hello from JS!');
-            }}
-          />
-        </Group>
-        <Group name="Events">
-          <Text>{onChangePayload?.value}</Text>
-        </Group>
-        <Group name="Views">
-          <ExpoSettingsView
-            url="https://www.example.com"
-            onLoad={({ nativeEvent: { url } }) => console.log(`Loaded: ${url}`)}
-            style={styles.view}
-          />
-        </Group>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 12,
+      }}
+    >
+      <Text>Live PCM Microphone Test</Text>
 
-function Group(props: { name: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.group}>
-      <Text style={styles.groupHeader}>{props.name}</Text>
-      {props.children}
+      <Button title="Start Recording" onPress={ExpoSettings.start} />
+      <Button title="Stop Recording" onPress={ExpoSettings.stop} />
     </View>
   );
 }
-
-const styles = {
-  header: {
-    fontSize: 30,
-    margin: 20,
-  },
-  groupHeader: {
-    fontSize: 20,
-    marginBottom: 20,
-  },
-  group: {
-    margin: 20,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 20,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#eee',
-  },
-  view: {
-    flex: 1,
-    height: 200,
-  },
-};
