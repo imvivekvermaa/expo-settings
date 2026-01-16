@@ -13,12 +13,12 @@ export default function App() {
       frameCountRef.current += 1;
 
       if (frameCountRef.current % 50 === 0) {
-        const pcmBytes =
-          (event.pcm.length * 3) / 4; // base64 → bytes approximation
+        const pcmBytes = (event.pcm.length * 3) / 4; // base64 → bytes approximation
 
-        console.log(
-          `[AUDIO] frames=${event.frames} sampleRate=${event.sampleRate} bytes≈${pcmBytes}`
-        );
+        // console.log(
+        //   `[AUDIO] frames=${event.frames} sampleRate=${event.sampleRate} bytes≈${pcmBytes}`
+        // );
+        console.log(`[AUDIO] ${JSON.stringify(event)}`);
       }
     });
 
